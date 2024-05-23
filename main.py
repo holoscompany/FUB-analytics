@@ -6,9 +6,7 @@ to a dataframe object and upload it to a Postgres database.
 
 Python Client for Meta Graph API
 https://developers.facebook.com/docs/graph-api/reference/insights
-https://developers.facebook.com/docs/instagram-api/getting-started
-https://developers.facebook.com/docs/instagram-api/reference/
-https://developers.facebook.com/docs/instagram-api/guides/insights
+https://developers.facebook.com/docs/instagram-api/reference/ig-media/
 https://developers.facebook.com/docs/instagram-api/reference/ig-user/insights
 https://developers.facebook.com/tools/debug/accesstoken
 """
@@ -18,7 +16,7 @@ import pendulum
 import requests
 import sys
 
-from sqlalchemy import create_engine, types, Engine, MetaData, Table
+from sqlalchemy import create_engine, Engine, MetaData, Table
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import sessionmaker
 from src._drv_hashicorp_vault import HashiVaultClient
@@ -34,21 +32,23 @@ def main():
     print(f"\nINFO  - BEGIN script at {pendulum.now().to_datetime_string()}")
 
     # Check if running from the command line and set parameters for start_date and end_date from CLI or from IDE
-    if len(sys.argv) != 3 and not any(os.environ.get(var) for var in ['VSCODE_PID', 'TERM_PROGRAM']):
+    if len(sys.argv) != 4 and not any(os.environ.get(var) for var in ['VSCODE_PID', 'TERM_PROGRAM']):
         print("\nERROR - Missing parameter.",
-              "INFO  - usage: './main.py start_date end_date'",
+              "INFO  - usage: './main.py script_type start_date end_date'",
               "INFO  - dates must be passed on format 'YYYY-MM-DD'", "", sep="\n")
         sys.exit(1)
 
     try:
         if len(sys.argv) > 3:
             # Parse values from command line
-            start_date = pendulum.parse(sys.argv[1]).start_of('day')
-            end_date = pendulum.parse(sys.argv[2]).end_of('day')
+            start_date = pendulum.parse(sys.argv[2]).start_of('day')
+            end_date = pendulum.parse(sys.argv[3]).end_of('day')
+            script_type = sys.argv[1]
         else:
             # Default values when running from an IDE
             start_date = pendulum.now().subtract(days=1).start_of('day')
             end_date = pendulum.now().subtract(days=1).end_of('day')
+            script_type = 'facebook'
 
     except IndexError as err:
         print("ERROR -", err)
@@ -61,34 +61,6 @@ def main():
     _, secret = HashiVaultClient().get_secret(secret_path)
     client = MetaInsights(client_secret=secret)
 
-    # FACEBOOK Insights
-    fb_df = pd.DataFrame()
-    for account in accounts:
-        temp_df = client.get_fb_page_insights(account, since=start_date, until=end_date)
-        fb_df = pd.concat([fb_df, temp_df], ignore_index=True)
-
-    # FACEBOOK Posts
-    fb_posts = pd.DataFrame()
-    for account in accounts:
-        temp_df = client.get_fb_post_info(account, limit=100)
-        fb_posts = pd.concat([fb_posts, temp_df], ignore_index=True)
-
-    # INSTAGRAM Daily Insights
-    ig_base_df = pd.DataFrame()
-    ig_detail_df = pd.DataFrame()
-    for account in accounts:
-        temp_base_df = client.get_ig_base_insights(account, since=start_date, until=end_date)
-        ig_base_df = pd.concat([ig_base_df, temp_base_df], ignore_index=True)
-
-        temp_detail_df = client.get_ig_detail_insights(account, since=start_date, until=end_date)
-        ig_detail_df = pd.concat([ig_detail_df, temp_detail_df], ignore_index=True)
-
-    # INSTAGRAM Lifetime Insights
-    ig_lft_insights_df = pd.DataFrame()
-    for account in accounts:
-        temp_df = client.get_ig_lifetime_insights(account)
-        ig_lft_insights_df = pd.concat([ig_lft_insights_df, temp_df], ignore_index=True)
-
     # SQLAlchemy engine setup and upsert to database
     secret_path = "engenharia@cluster-postgresql-0001-01"  # HashiVault secret name
     _, secret = HashiVaultClient().get_secret(secret_path)
@@ -96,62 +68,135 @@ def main():
     uri = f'postgresql+psycopg2://{secret["user"]}:{secret["password"]}@{secret["host"]}:{secret["port"]}/{database}'
     engine = create_engine(uri)
 
-    if fb_df.empty:
-        print("INFO  - No Facebook Insights data to write to the database.")
+    # Fetch FACEBOOK data
+    if script_type == 'facebook':
 
-    else:
-        print("\n", fb_df)
-        # fb_df.to_csv("./sample_fb_page_insights.csv")
+        # # FACEBOOK Insights
+        # fb_df = pd.DataFrame()
+        # for account in accounts:
+        #     temp_df = client.get_fb_page_insights(account, since=start_date, until=end_date)
+        #     fb_df = pd.concat([fb_df, temp_df], ignore_index=True)
 
-        schema = 'public'
-        table_name = 'facebook_insights'
-        constraint_columns = ['end_time', 'page_id']
+        # if fb_df.empty:
+        #     print("INFO  - No Facebook Insights data to write to the database.")
 
-        client.upsert_df_into_postgres(engine, table_name, schema, fb_df, constraint_columns)
+        # else:
+        #     print("\n", fb_df)
+        #     # fb_df.to_csv("./sample_fb_page_insights.csv")
 
-    if fb_posts.empty:
-        print("INFO  - No Facebook Posts data to write to the database.")
+        #     schema = 'public'
+        #     table_name = 'facebook_insights'
+        #     constraint_columns = ['end_time', 'page_id']
 
-    else:
-        print(fb_posts)
-        fb_posts.to_csv("./sample_fb_posts.csv")
+        #     client.upsert_df_into_postgres(engine, table_name, schema, fb_df, constraint_columns)
 
-        schema = 'public'
-        table_name = 'facebook_posts'
-        constraint_columns = ['id']
+        # # FACEBOOK Posts
+        # fb_posts_df = pd.DataFrame()
+        # for account in accounts:
+        #     temp_df = client.get_fb_post_data(account, limit=100)
+        #     fb_posts_df = pd.concat([fb_posts_df, temp_df], ignore_index=True)
 
-        client.upsert_df_into_postgres(engine, table_name, schema, fb_posts, constraint_columns)
+        # if fb_posts_df.empty:
+        #     print("INFO  - No Facebook Posts data to write to the database.")
 
-    if ig_base_df.empty and ig_detail_df.empty:
-        print("INFO  - No Instagram Daily Insights data to write to the database.")
+        # else:
+        #     print(fb_posts_df)
+        #     fb_posts_df.to_csv("./sample_fb_posts_data.csv")
 
-    else:
-        # Join the DataFrames
-        ig_df = pd.merge(ig_base_df, ig_detail_df, on=['end_time', 'account_id'], how='inner').reset_index(drop=True)
-        ig_df.rename(columns={'end_time': 'date', 'account_id': 'business_account_id',
-                              'impressions_day': 'impressions', 'reach_day': 'reach'}, inplace=True)
+        #     schema = 'public'
+        #     table_name = 'facebook_posts'
+        #     constraint_columns = ['id']
 
-        print("\n", ig_df)
-        # ig_df.to_csv("./sample_instagram_insights.csv")
+        #     client.upsert_df_into_postgres(engine, table_name, schema, fb_posts_df, constraint_columns)
 
-        schema = 'instagram'
-        table_name = 'user_insights'
-        constraint_columns = ['date', 'page_id']
+        # FACEBOOK Posts
+        fb_posts_df = pd.DataFrame()
+        for account in accounts:
+            temp_df = client.get_fb_post_insights(account, limit=100)
+            fb_posts_df = pd.concat([fb_posts_df, temp_df], ignore_index=True)
 
-        client.upsert_df_into_postgres(engine, table_name, schema, ig_df, constraint_columns)
+        if fb_posts_df.empty:
+            print("INFO  - No Facebook Posts Insights to write to the database.")
 
-    if ig_lft_insights_df.empty:
-        print("INFO  - No Instagram Lifetime Insights data to write to the database.")
+        else:
+            print(fb_posts_df)
+            fb_posts_df.to_csv("./sample_fb_posts_insights.csv")
 
-    else:
-        print("\n", ig_lft_insights_df)
-        # fb_df.to_csv("./sample_ig_lft_insights.csv")
+            schema = 'public'
+            table_name = 'facebook_posts'
+            constraint_columns = ['id']
 
-        schema = 'instagram'
-        table_name = 'user_lifetime_insights'
-        constraint_columns = ['event_date', 'page_id', 'breakdown']
+            # client.upsert_df_into_postgres(engine, table_name, schema, fb_posts_df, constraint_columns)
 
-        client.upsert_df_into_postgres(engine, table_name, schema, ig_lft_insights_df, constraint_columns)
+    # Fetch INSTAGRAM data
+    if script_type == 'instagram':
+
+        # INSTAGRAM Posts and Insights
+        ig_posts_df = pd.DataFrame()
+        for account in accounts:
+            temp_base_df = client.get_ig_post_data(account, limit=100)
+            ig_posts_df = pd.concat([ig_posts_df, temp_base_df], ignore_index=True)
+
+        if ig_posts_df.empty:
+            print("INFO  - No Facebook Posts data to write to the database.")
+
+        else:
+            print("\n", ig_posts_df)
+            # ig_posts_df.to_csv("./sample_ig_posts_data.csv")
+
+            schema = 'instagram'
+            table_name = 'posts'
+            constraint_columns = ['id']
+
+            client.upsert_df_into_postgres(engine, table_name, schema, ig_posts_df, constraint_columns)
+
+        # INSTAGRAM Daily Insights
+        ig_base_df = pd.DataFrame()
+        ig_detail_df = pd.DataFrame()
+        for account in accounts:
+            temp_base_df = client.get_ig_base_insights(account, since=start_date, until=end_date)
+            ig_base_df = pd.concat([ig_base_df, temp_base_df], ignore_index=True)
+
+            temp_detail_df = client.get_ig_detail_insights(account, since=start_date, until=end_date)
+            ig_detail_df = pd.concat([ig_detail_df, temp_detail_df], ignore_index=True)
+
+        if ig_base_df.empty and ig_detail_df.empty:
+            print("INFO  - No Instagram Daily Insights data to write to the database.")
+
+        else:
+            # Join the DataFrames
+            ig_df = pd.merge(ig_base_df, ig_detail_df, on=['end_time',
+                             'account_id'], how='inner').reset_index(drop=True)
+            ig_df.rename(columns={'end_time': 'date', 'account_id': 'business_account_id',
+                                  'impressions_day': 'impressions', 'reach_day': 'reach'}, inplace=True)
+
+            print("\n", ig_df)
+            # ig_df.to_csv("./sample_ig_insights.csv")
+
+            schema = 'instagram'
+            table_name = 'user_insights'
+            constraint_columns = ['date', 'page_id']
+
+            client.upsert_df_into_postgres(engine, table_name, schema, ig_df, constraint_columns)
+
+        # INSTAGRAM Lifetime Insights
+        ig_lft_insights_df = pd.DataFrame()
+        for account in accounts:
+            temp_df = client.get_ig_lifetime_insights(account)
+            ig_lft_insights_df = pd.concat([ig_lft_insights_df, temp_df], ignore_index=True)
+
+        if ig_lft_insights_df.empty:
+            print("INFO  - No Instagram Lifetime Insights data to write to the database.")
+
+        else:
+            print("\n", ig_lft_insights_df)
+            # fb_df.to_csv("./sample_ig_lft_insights.csv")
+
+            schema = 'instagram'
+            table_name = 'user_lifetime_insights'
+            constraint_columns = ['event_date', 'page_id', 'breakdown']
+
+            client.upsert_df_into_postgres(engine, table_name, schema, ig_lft_insights_df, constraint_columns)
 
 
 class MetaInsights():
@@ -228,16 +273,13 @@ class MetaInsights():
         }
         url = f'{base_url}{endpoint}'
 
-        # print(f'Request endpoint: {url}')  # DEBUG
-        # print(f'Request params: {params}')  # DEBUG
-
         # Make the HTTP request
         print(f"INFO  - Request for API endpoint '{endpoint}' since '{since_str}' until '{until_str}'")
         response = requests.get(url, params=params)
         response_json = response.json()
 
-        if response_json.get('data') is None:
-            print('INFO  - No records for selected date')
+        if not isinstance(response_json, dict) or 'data' not in response_json:
+            print('INFO  - No records for Facebook Page Insights selected parameters.')
             return None
 
         # Flatten the data
@@ -264,12 +306,12 @@ class MetaInsights():
 
         return df_pivoted
 
-    def get_fb_post_info(self, account_name: str, limit: int = 100) -> pd.DataFrame:
+    def get_fb_post_data(self, account_name: str, limit: int = 100) -> pd.DataFrame:
         """
         Fetch Facebook posts basic info.
 
         Parameters:
-        - object_id (str): Facebook account name.
+        - account_name (str): Facebook account name.
         - limit (int): Number of last posts to be fetched.
 
         Returns:
@@ -286,33 +328,83 @@ class MetaInsights():
         params = {
             'access_token': page_token,
             'fields': ','.join(self.fb_post_params['fields']),
-            'period': 'lifetime',
             'limit': limit,
         }
         url = f'{base_url}{endpoint}'
-
-        # print(f'Request endpoint: {url}')  # DEBUG
-        # print(f'Request params: {params}')  # DEBUG
 
         # Make the HTTP request
         print(f"INFO  - Request for API endpoint '{endpoint}'")
         response = requests.get(url, params=params)
         response_json = response.json()
 
-        if response_json.get('data') is None:
-            print('INFO  - No records for selected date')
+        if not isinstance(response_json, dict) or 'data' not in response_json:
+            print('INFO  - No records for Facebook posts selected parameters.')
             return None
 
-        # Create base dataframe
-        df = pd.DataFrame(columns=[col for col in self.fb_post_params['fields']])
+        # Convert the list into a DataFrame
+        df = pd.DataFrame(response_json['data'])
+
+        # Clean column text if columns exist
+        if 'message' in df.columns:
+            df['message'] = df['message'].apply(self.clean_text)
+        if 'story' in df.columns:
+            df['story'] = df['story'].apply(self.clean_text)
+
+        return df
+
+    def get_fb_post_insights(self, account_name: str, limit: int = 100) -> pd.DataFrame:
+        """
+        Fetch Facebook posts insights info.
+
+        Parameters:
+        - account_name (str): Facebook account name.
+        - limit (int): Number of last posts to be fetched.
+
+        Returns:
+        - pd.DataFrame: DataFrame containing the retrieved insights data.
+        """
+
+        account = self.get_account_id(account_name)
+        page_id = account.get("id")
+        page_token = account.get("access_token")
+
+        # Construct the API request URL
+        base_url = 'https://graph.facebook.com/v19.0'
+        endpoint = f'/{page_id}/posts'
+        params = {
+            'access_token': page_token,
+            'fields': 'id',
+            'limit': limit,
+        }
+        url = f'{base_url}{endpoint}'
+
+        # Make the HTTP request for the posts id list
+        response = requests.get(url, params=params)
+        response_json = response.json()
+
+        post_id_list = [item["id"] for item in response_json['data']]
+
+        # Make the HTTP request for the posts insights
+        params[''] = ''
+        response = requests.get(url, params=params)
+        response_json = response.json()
+
+        for post_id in post_id_list:
+            endpoint = f'/{page_id}/posts'
+            url = f'{base_url}{endpoint}'
+
+        # if not isinstance(response_json, dict) or 'data' not in response_json:
+        #     print('INFO  - No records for Facebook posts selected parameters.')
+        #     return None
 
         # Convert the list into a DataFrame
-        temp_df = pd.DataFrame(response_json['data'])
-        df = pd.concat([df, temp_df], ignore_index=True)
+        df = pd.DataFrame(response_json['data'])
 
-        # Clean column text
-        df['message'] = df['message'].apply(self.clean_text)
-        df['story'] = df['story'].apply(self.clean_text)
+        # # Clean column text if columns exist
+        # if 'message' in df.columns:
+        #     df['message'] = df['message'].apply(self.clean_text)
+        # if 'story' in df.columns:
+        #     df['story'] = df['story'].apply(self.clean_text)
 
         return df
 
@@ -322,7 +414,7 @@ class MetaInsights():
         Fetch basic insights data ('impressions', 'reach') from Instagram business accounts.
 
         Parameters:
-        - object_id (str): ID of the Facebook or Instagram page.
+        - account_name (str): Facebook account name that manage the desired Instagram business account.
         - since (str): Pendulum datetime obj for Start date.
         - until (str): Pendulum datetime obj for End date.
 
@@ -358,8 +450,8 @@ class MetaInsights():
         response = requests.get(url, params=params)
         response_json = response.json()
 
-        if response_json.get('data') is None:
-            print('INFO  - No records for selected date')
+        if not isinstance(response_json, dict) or 'data' not in response_json:
+            print('INFO  - No records for Instagram basic insights selected parameters.')
             return None
 
         # Flatten the data
@@ -385,7 +477,7 @@ class MetaInsights():
         Fetch detailed insights data from Instagram business accounts.
 
         Parameters:
-        - object_id (str): Facebook account name that manage the desired Instagram business account.
+        - account_name (str): Facebook account name that manage the desired Instagram business account.
         - since (str): Pendulum datetime obj for Start date.
         - until (str): Pendulum datetime obj for End date.
 
@@ -420,8 +512,8 @@ class MetaInsights():
         response = requests.get(url, params=params)
         response_json = response.json()
 
-        if response_json.get('data') is None:
-            print('INFO  - No records for selected date')
+        if not isinstance(response_json, dict) or 'data' not in response_json:
+            print('INFO  - No records for Instagram detail insights selected parameters.')
             return None
 
         # Flatten the data
@@ -450,7 +542,7 @@ class MetaInsights():
         Fetch lifetime insights data from Instagram business accounts.
 
         Parameters:
-        - object_id (str): Facebook account name that manage the desired Instagram business account.
+        - account_name (str): Facebook account name that manage the desired Instagram business account.
 
         Returns:
         - pd.DataFrame: DataFrame containing the retrieved insights data.
@@ -507,7 +599,59 @@ class MetaInsights():
 
         return df
 
+    def get_ig_post_data(self, account_name: str, limit: int = 100) -> pd.DataFrame:
+        """
+        Fetch Instagram posts basic info.
+
+        Parameters:
+        - account_name (str): Facebook account name that manage the desired Instagram business account.
+        - limit (int): Number of last posts to be fetched.
+
+        Returns:
+        - pd.DataFrame: DataFrame containing the retrieved insights data.
+        """
+
+        account = self.get_account_id(account_name)
+        account_id = account.get("instagram_business_account", {}).get("id")
+        user_access_token = self.user_access_token
+
+        # Construct the API request URL
+        base_url = 'https://graph.facebook.com/v19.0'
+        endpoint = f'/{account_id}/media'
+        params = {
+            'access_token': user_access_token,
+            'fields': ','.join(self.ig_post_params['fields']),
+            'limit': limit,
+        }
+        url = f'{base_url}{endpoint}'
+
+        # Make the HTTP request
+        print(f"INFO  - Request for API endpoint '{endpoint}'")
+        response = requests.get(url, params=params)
+        response_json = response.json()
+
+        if not isinstance(response_json, dict) or 'data' not in response_json:
+            print('INFO  - No records for Instagram posts selected parameters.')
+            return None
+
+        # Convert the list into a DataFrame
+        df = pd.DataFrame(response_json['data'])
+
+        # Clean column text if columns exist
+        if 'caption' in df.columns:
+            df['caption'] = df['caption'].apply(self.clean_text)
+
+        return df
+
     def clean_text(self, text: str) -> str:
+        '''
+        Clean text removing line breaks, line feeds and encoding to UTF-8.
+        Parameters:
+        - text (str): Input text to be cleaned.
+
+        Returns:
+        - str: The cleaned result text.
+        '''
         if text is None or pd.isna(text):
             return ''
 
@@ -565,7 +709,7 @@ class MetaInsights():
                 result = session.execute(insert_stmt)
 
             session.commit()
-            print(f"INFO - Sucess on insert operation with '{result.rowcount}' rows affected.")
+            print(f"INFO - Sucess on insert operation with '{result.rowcount}' rows affected.\n")
 
         except Exception as e:
             session.rollback()
@@ -607,40 +751,7 @@ class MetaInsights():
             'page_fan_removes',
 
             'page_views_total',
-        ],
-        'dtype': {
-            'end_time': types.TIMESTAMP(),
-            'page_id': types.Integer(),
-
-            'page_post_engagements': types.Integer(),
-            'page_consumptions_unique': types.Integer(),
-            'page_negative_feedback': types.Integer(),
-            'page_fans_online_per_day': types.Integer(),
-
-            'page_impressions': types.Integer(),
-            'page_impressions_organic_v2': types.Integer(),
-            'page_impressions_paid': types.Integer(),
-            'page_impressions_unique': types.Integer(),
-
-            'page_posts_impressions': types.Integer(),
-            'page_posts_impressions_organic': types.Integer(),
-            'page_posts_impressions_paid': types.Integer(),
-            'page_posts_impressions_unique': types.Integer(),
-
-            'page_actions_post_reactions_like_total': types.Integer(),
-            'page_actions_post_reactions_love_total': types.Integer(),
-            'page_actions_post_reactions_wow_total': types.Integer(),
-            'page_actions_post_reactions_haha_total': types.Integer(),
-            'page_actions_post_reactions_sorry_total': types.Integer(),
-            'page_actions_post_reactions_anger_total': types.Integer(),
-            'page_actions_post_reactions_total': types.JSON(),
-
-            'page_fans': types.Integer(),
-            'page_fan_adds': types.Integer(),
-            'page_fan_removes': types.Integer(),
-
-            'page_views_total': types.Integer(),
-        }
+        ]
     }
 
     fb_post_params = {
@@ -672,29 +783,29 @@ class MetaInsights():
     ig_page_params = {
         'metrics': [
             'follower_count',
-
             'profile_views',
             'email_contacts',
             'get_directions_clicks',
             'phone_call_clicks',
             'text_message_clicks',
             'website_clicks',
-        ],
-        'dtype': {
-            'impressions': types.Integer(),
-            'impressions_week': types.Integer(),
-            'impressions_days_28': types.Integer(),
-            'reach': types.Integer(),
-            'reach_week': types.Integer(),
-            'reach_days_28': types.Integer(),
-            'follower_count': types.Integer(),
-            'profile_views': types.Integer(),
-            'email_contacts': types.Integer(),
-            'get_directions_clicks': types.Integer(),
-            'phone_call_clicks': types.Integer(),
-            'text_message_clicks': types.Integer(),
-            'website_clicks': types.Integer(),
-        }
+        ]
+    }
+
+    ig_post_params = {
+        'fields': [
+            'id',
+            'ig_id',
+            'username',
+            'caption',
+            'media_product_type',
+            'media_type',
+            'media_url',
+            'permalink',
+            'like_count',
+            'comments_count',
+            'timestamp',
+        ]
     }
 
 
