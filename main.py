@@ -63,15 +63,19 @@ def main():
 
     # FACEBOOK Insights
     fb_df = pd.DataFrame()
-
     for account in accounts:
         temp_df = client.get_fb_page_insights(account, since=start_date, until=end_date)
         fb_df = pd.concat([fb_df, temp_df], ignore_index=True)
 
+    # FACEBOOK Posts
+    fb_posts = pd.DataFrame()
+    for account in accounts:
+        temp_df = client.get_fb_post_info(account, limit=100)
+        fb_posts = pd.concat([fb_posts, temp_df], ignore_index=True)
+
     # INSTAGRAM Daily Insights
     ig_base_df = pd.DataFrame()
     ig_detail_df = pd.DataFrame()
-
     for account in accounts:
         temp_base_df = client.get_ig_base_insights(account, since=start_date, until=end_date)
         ig_base_df = pd.concat([ig_base_df, temp_base_df], ignore_index=True)
@@ -81,14 +85,11 @@ def main():
 
     # INSTAGRAM Lifetime Insights
     ig_lft_insights_df = pd.DataFrame()
-
     for account in accounts:
         temp_df = client.get_ig_lifetime_insights(account)
         ig_lft_insights_df = pd.concat([ig_lft_insights_df, temp_df], ignore_index=True)
 
-    #
     # SQLAlchemy engine setup and upsert to database
-    #
     secret_path = "engenharia@cluster-postgresql-0001-01"  # HashiVault secret name
     _, secret = HashiVaultClient().get_secret(secret_path)
     database = 'HC_FUTUREBRAND'
@@ -107,6 +108,19 @@ def main():
         constraint_columns = ['end_time', 'page_id']
 
         client.upsert_df_into_postgres(engine, table_name, schema, fb_df, constraint_columns)
+
+    if fb_posts.empty:
+        print("INFO  - No Facebook Posts data to write to the database.")
+
+    else:
+        print(fb_posts)
+        fb_posts.to_csv("./sample_fb_posts.csv")
+
+        schema = 'public'
+        table_name = 'facebook_posts'
+        constraint_columns = ['id']
+
+        client.upsert_df_into_postgres(engine, table_name, schema, fb_posts, constraint_columns)
 
     if ig_base_df.empty and ig_detail_df.empty:
         print("INFO  - No Instagram Daily Insights data to write to the database.")
@@ -188,9 +202,7 @@ class MetaInsights():
         Fetch insights data from Facebook and Instagram.
 
         Parameters:
-        - object_id (str): ID of the Facebook or Instagram page.
-        - metrics (list): List of metrics to retrieve (e.g., ['followers', 'likes', 'comments']).
-        - period (str): Period for which to retrieve data (e.g., 'day', 'week', 'month').
+        - object_id (str): Facebook account name.
         - since (str): Start date in YYYY-MM-DD format.
         - until (str): End date in YYYY-MM-DD format.
 
@@ -209,7 +221,7 @@ class MetaInsights():
         endpoint = f'/{page_id}/insights'
         params = {
             'access_token': page_token,
-            'metric': ','.join(self.fb_params['metrics']),
+            'metric': ','.join(self.fb_page_params['metrics']),
             'period': 'day',
             'since': since_str,
             'until': until_str,
@@ -252,10 +264,62 @@ class MetaInsights():
 
         return df_pivoted
 
+    def get_fb_post_info(self, account_name: str, limit: int = 100) -> pd.DataFrame:
+        """
+        Fetch Facebook posts basic info.
+
+        Parameters:
+        - object_id (str): Facebook account name.
+        - limit (int): Number of last posts to be fetched.
+
+        Returns:
+        - pd.DataFrame: DataFrame containing the retrieved insights data.
+        """
+
+        account = self.get_account_id(account_name)
+        page_id = account.get("id")
+        page_token = account.get("access_token")
+
+        # Construct the API request URL
+        base_url = 'https://graph.facebook.com/v19.0'
+        endpoint = f'/{page_id}/posts'
+        params = {
+            'access_token': page_token,
+            'fields': ','.join(self.fb_post_params['fields']),
+            'period': 'lifetime',
+            'limit': limit,
+        }
+        url = f'{base_url}{endpoint}'
+
+        # print(f'Request endpoint: {url}')  # DEBUG
+        # print(f'Request params: {params}')  # DEBUG
+
+        # Make the HTTP request
+        print(f"INFO  - Request for API endpoint '{endpoint}'")
+        response = requests.get(url, params=params)
+        response_json = response.json()
+
+        if response_json.get('data') is None:
+            print('INFO  - No records for selected date')
+            return None
+
+        # Create base dataframe
+        df = pd.DataFrame(columns=[col for col in self.fb_post_params['fields']])
+
+        # Convert the list into a DataFrame
+        temp_df = pd.DataFrame(response_json['data'])
+        df = pd.concat([df, temp_df], ignore_index=True)
+
+        # Clean column text
+        df['message'] = df['message'].apply(self.clean_text)
+        df['story'] = df['story'].apply(self.clean_text)
+
+        return df
+
     def get_ig_base_insights(self, account_name: str,
                              since: pendulum.datetime = None, until: pendulum.datetime = None) -> pd.DataFrame:
         """
-        Fetch insights data from Instagram accounts.
+        Fetch basic insights data ('impressions', 'reach') from Instagram business accounts.
 
         Parameters:
         - object_id (str): ID of the Facebook or Instagram page.
@@ -318,10 +382,10 @@ class MetaInsights():
     def get_ig_detail_insights(self, account_name: str,
                                since: pendulum.datetime = None, until: pendulum.datetime = None) -> pd.DataFrame:
         """
-        Fetch insights data from Instagram accounts.
+        Fetch detailed insights data from Instagram business accounts.
 
         Parameters:
-        - object_id (str): ID of the Facebook or Instagram page.
+        - object_id (str): Facebook account name that manage the desired Instagram business account.
         - since (str): Pendulum datetime obj for Start date.
         - until (str): Pendulum datetime obj for End date.
 
@@ -345,7 +409,7 @@ class MetaInsights():
         endpoint = f'/{account_id}/insights'
         params = {
             'access_token': user_access_token,
-            'metric': ','.join(self.ig_params['metrics']),
+            'metric': ','.join(self.ig_page_params['metrics']),
             'period': 'day',
             'since': since,
             'until': until,
@@ -383,10 +447,10 @@ class MetaInsights():
 
     def get_ig_lifetime_insights(self, account_name: str) -> pd.DataFrame:
         """
-        Fetch lifetime insights data from Instagram accounts.
+        Fetch lifetime insights data from Instagram business accounts.
 
         Parameters:
-        - object_id (str): ID of the Facebook or Instagram page.
+        - object_id (str): Facebook account name that manage the desired Instagram business account.
 
         Returns:
         - pd.DataFrame: DataFrame containing the retrieved insights data.
@@ -442,6 +506,14 @@ class MetaInsights():
         df = pd.DataFrame(result)
 
         return df
+
+    def clean_text(self, text: str) -> str:
+        if text is None or pd.isna(text):
+            return ''
+
+        result = text.replace('\n', ' ').replace('\r', ' ')
+        result = result.encode('utf-8', 'ignore').decode('utf-8')
+        return result
 
     def upsert_df_into_postgres(self, sqlalchemy_engine: Engine, table_name: str, schema: str,
                                 dataframe: pd.DataFrame, constraint_columns: list = None) -> str:
@@ -503,7 +575,7 @@ class MetaInsights():
         finally:
             session.close()
 
-    fb_params = {
+    fb_page_params = {
         'metrics': [
             'page_total_actions',
 
@@ -571,9 +643,36 @@ class MetaInsights():
         }
     }
 
-    ig_params = {
+    fb_post_params = {
+        'fields': [
+            'id',
+            'story',
+            'message',
+            'full_picture',
+            'permalink_url',
+            'is_expired',
+            'is_hidden',
+            'is_published',
+            'created_time',
+            'updated_time',
+        ],
+        'metrics': [
+            'post_impressions',
+            'post_impressions_unique',
+            'post_impressions_paid',
+            'post_impressions_organic',
+            'post_engaged_users',
+            'post_clicks',
+            'post_negative_feedback',
+            'post_reactions_by_type_total',
+            'post_activity_by_action_type',
+        ]
+    }
+
+    ig_page_params = {
         'metrics': [
             'follower_count',
+
             'profile_views',
             'email_contacts',
             'get_directions_clicks',
