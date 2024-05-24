@@ -1,5 +1,4 @@
 facebook_business
-gspread
 hvac
 pandas
 pendulum
