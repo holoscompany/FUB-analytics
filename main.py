@@ -46,7 +46,7 @@ def main():
             script_type = sys.argv[1]
         else:
             # Default values when running from an IDE
-            start_date = pendulum.now().subtract(days=1).start_of('day')
+            start_date = pendulum.now().subtract(days=4).start_of('day')
             end_date = pendulum.now().subtract(days=1).end_of('day')
             script_type = 'instagram'
 
@@ -93,7 +93,7 @@ def main():
         # FACEBOOK posts data
         fb_posts_df = pd.DataFrame()
         for account in accounts:
-            temp_df = client.get_fb_post_data(account, limit=10)
+            temp_df = client.get_fb_post_data(account, limit=5)
             fb_posts_df = pd.concat([fb_posts_df, temp_df], ignore_index=True)
 
         if fb_posts_df.empty:
@@ -112,7 +112,7 @@ def main():
         # FACEBOOK post insights
         fb_post_insights_df = pd.DataFrame()
         for account in accounts:
-            temp_df = client.get_fb_post_insights(account, limit=10)
+            temp_df = client.get_fb_post_insights(account, limit=5)
             fb_post_insights_df = pd.concat([fb_post_insights_df, temp_df], ignore_index=True)
 
         if fb_posts_df.empty:
@@ -131,29 +131,29 @@ def main():
     # Fetch INSTAGRAM data
     if script_type == 'instagram':
 
-        # # INSTAGRAM Posts data
-        # ig_posts_df = pd.DataFrame()
-        # for account in accounts:
-        #     temp_base_df = client.get_ig_post_data(account, limit=10)
-        #     ig_posts_df = pd.concat([ig_posts_df, temp_base_df], ignore_index=True)
+        # INSTAGRAM Posts data
+        ig_posts_df = pd.DataFrame()
+        for account in accounts:
+            temp_base_df = client.get_ig_post_data(account, limit=5)
+            ig_posts_df = pd.concat([ig_posts_df, temp_base_df], ignore_index=True)
 
-        # if ig_posts_df.empty:
-        #     print("INFO  - No Facebook Posts data to write to the database.")
+        if ig_posts_df.empty:
+            print("INFO  - No Facebook Posts data to write to the database.")
 
-        # else:
-        #     print("\n", ig_posts_df)
-        #     # ig_posts_df.to_csv("./sample_ig_posts_data.csv")  # DEBUG
+        else:
+            print("\n", ig_posts_df)
+            # ig_posts_df.to_csv("./sample_ig_posts_data.csv")  # DEBUG
 
-        #     schema = 'public'
-        #     table_name = 'ig_posts'
-        #     constraint_columns = ['id']
+            schema = 'public'
+            table_name = 'ig_posts'
+            constraint_columns = ['id']
 
-        #     client.upsert_df_into_postgres(engine, table_name, schema, ig_posts_df, constraint_columns)
+            client.upsert_df_into_postgres(engine, table_name, schema, ig_posts_df, constraint_columns)
 
         # INSTAGRAM Posts Insights
         ig_posts_insights_df = pd.DataFrame()
         for account in accounts:
-            temp_base_df = client.get_ig_post_insights(account, limit=100)
+            temp_base_df = client.get_ig_post_insights(account, limit=5)
             ig_posts_insights_df = pd.concat([ig_posts_insights_df, temp_base_df], ignore_index=True)
 
         if ig_posts_insights_df.empty:
