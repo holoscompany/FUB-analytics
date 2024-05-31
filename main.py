@@ -19,7 +19,7 @@ import sys
 from sqlalchemy import create_engine, Engine, MetaData, Table
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import sessionmaker
-from src._drv_hashicorp_vault import HashiVaultClient
+from _drv_hashicorp_vault import HashiVaultClient
 
 SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
 
